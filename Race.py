@@ -14,10 +14,18 @@ pygame.init()
 pygame.font.init()
 DB = Store("settings.json")
 
-m = input("Host or join? (h/j): ")
+def loadvar(name, default):
+    val = DB.get(name)
+    if val == None:
+        DB.set(name, default)
+        return(default)
+    else:
+        return(val)
+
+m = input("Host or join? (port 5667) (h/j): ")
 if m == "h":
     NM = NetManager(("server", 4), ["pos", "dir", "name"])
-    s = Server()
+    s = Server(loadvar("hosting IP", "0.0.0.0"), input("Hosting port (default 5667): "))
     
     def getclients():
         with s.clients_lock:
@@ -30,17 +38,9 @@ if m == "h":
 elif m == "j":
     NM = NetManager("client")
     if input("try join server? (y/n): ") == "y":
-        s = Client("leading-hon.gl.at.ply.gg", 57676)
+        s = Client(loadvar("Default server IP", "forums-achievement.gl.at.ply.gg"), loadvar("Default server port", 11802))
     else:
-        s = Client(input("Enter IP: "), 5667)
-
-def loadvar(name, default):
-    val = DB.get(name)
-    if val == None:
-        DB.set(name, default)
-        return(default)
-    else:
-        return(val)
+        s = Client(input("Enter IP: "), int(input("Enter Port: ")))
 
 #system variables
 WIDTH = loadvar("width", 800)
