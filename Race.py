@@ -25,7 +25,7 @@ def loadvar(name, default):
 m = input("Host or join? (port 5667) (h/j): ")
 if m == "h":
     NM = NetManager(("server", 4), ["pos", "dir", "name"])
-    s = Server(loadvar("hosting IP", "0.0.0.0"), input("Hosting port (default 5667): "))
+    s = Server(loadvar("hosting IP", "0.0.0.0"), int(input("Hosting port (default 5667): ")))
     
     def getclients():
         with s.clients_lock:
