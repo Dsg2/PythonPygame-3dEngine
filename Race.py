@@ -51,6 +51,7 @@ clock = pygame.time.Clock()
 FPS = loadvar("fps", 40)
 font = pygame.font.SysFont('Arial', 16)
 renderlist = []
+CLOSERANGE = loadvar("clipping plane", 0)
 renderrange = loadvar("rendering range", 150)
 cache = None
 polycache = []
@@ -75,6 +76,12 @@ carz = 0
 carspeed = 0
 carturn = 0
 cardirect = 0
+turnfactor = 0
+maxspeed = 0
+maxturn = 0
+maxturnfactor = 0
+lastspeed = 0
+lastsmooth = 0
 
 #debug variables
 f = 0
@@ -94,36 +101,58 @@ vehicle = MeshObject([
     [(3.0, 1.0, 1.5), (3.0, -1.0, 1.5), (-6.0, 0.0, 0.0)],
 ])
 
+quadsize = 10
+QUAD = MeshObject([[(0, 0, 0), (quadsize, 0, 0), (0, -quadsize, 0)], [(quadsize, -quadsize, 0), (quadsize, 0, 0), (0, -quadsize, 0)]])
+
 colourmap = [(125, 0, 0), (125, 0, 0), (125, 125, 125), (255, 0, 0), (255, 0, 0), (75, 75, 255)]
 othercolourmap = [(0, 0, 125), (0, 0, 125), (125, 125, 125), (0, 0, 255), (0, 0, 255), (255, 75, 75)]
 
-randlist.append(("light", (0, 0, 0), 750, (255, 255, 255)))
-for i in range(500):
-    randx = random.randint(-1000, 1000)
-    randy = random.randint(-1000, 1000)
-    randz = random.randint(-10, 10)
-    randlist.append(("poly", [(randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2))], 1, (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))))
+randlist.append(("light", (0, 0, 0), 100, (255, 255, 255)))
+#for i in range(500):
+#    randx = random.randint(-1000, 1000)
+#    randy = random.randint(-1000, 1000)
+#    randz = random.randint(-10, 10)
+#    randlist.append(("poly", [(randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2))], 1, (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))))
+
+def plane(x, y, z, size, colour):
+    planecache = []
+    QUAD.position = (x, y, z)
+    for tri in QUAD.get_world_tri():
+        planecache.append(("poly", tri, 1, colour))
+    return planecache
+
+for i in range(50):
+    for j in range(50):
+        plan = plane((i - 25) * quadsize, (j - 25) * quadsize, -2, 10, (random.randint(0, 50), random.randint(200, 255), random.randint(0, 50)))
+        for tri in plan:
+            randlist.append(tri)
 
 def inp():
-    global x, y, z, direct, pitch, lightpos, lightstrength, incar, carx, cary, carz, carspeed, carturn, cardirect
+    global x, y, z, direct, pitch, lightpos, lightstrength, incar, carx, cary, carz, carspeed, turnfactor, carturn, cardirect, lastspeed, lastsmooth
     keypressed = pygame.key.get_pressed()
     mx, my = pygame.mouse.get_rel()
     
     if incar:
         dirrad = math.radians(cardirect)
         move = (keypressed[pygame.K_w] - keypressed[pygame.K_s])  # forward/back
+        fx, fy = math.cos(dirrad), math.sin(dirrad)
         rx, ry = math.cos(dirrad + math.pi/2), math.sin(dirrad + math.pi/2)
         
-        carspeed = (carspeed + move) / 1.01
-        carx += (rx * carspeed) * 0.03
-        cary += (ry * carspeed) * 0.03
+        turnfactor = (turnfactor + 0.02 * keypressed[pygame.K_LSHIFT]) / 1.05
         turn = (keypressed[pygame.K_d] - keypressed[pygame.K_a]) * 5
-        carturn = (carturn + min(1, max((mx + turn) * -SENSITIVITY * 0.7, -1)) * 0.3) / (1.03 + (abs(carspeed / 800)))
+        carturn = (carturn + min(1, max((mx + turn) * -SENSITIVITY * 0.4 * (turnfactor * 1.3 + 1), -1)) * 0.3) / (1.03 + (abs(carspeed / 800)))
+        carspeed = (carspeed + move) / 1.01 / (1 + turnfactor / 30)
+        carx += (rx * carspeed + fx * (turnfactor) * carturn * 10) * 0.03
+        cary += (ry * carspeed + fy * (turnfactor) * carturn * 10) * 0.03
+        carturn = min(max(-5, carturn), 5)
         cardirect += carturn
-        x = carx - (math.sin(-dirrad) * ((carspeed * 0.1) + 10))
-        y = cary - (math.cos(-dirrad) * ((carspeed * 0.1) + 10))
+        x = carx - (math.sin(-dirrad) * ((carspeed * 0.1 / (turnfactor + 1)) + 10) + fx * (turnfactor) * carturn * 2)
+        y = cary - (math.cos(-dirrad) * ((carspeed * 0.1 / (turnfactor + 1)) + 10) + fy * (turnfactor) * carturn * 2)
         z = carz + 4
-        direct = cardirect
+        direct = cardirect + carturn * 1
+        pitch = ((lastsmooth / -2) + carspeed / 10) - 15
+        lastsmooth = (lastsmooth + (lastspeed - carspeed)) / 1.05
+        lastspeed = carspeed
         
     else:
         speed = 0.6 if keypressed[pygame.K_LSHIFT] else 0.25
@@ -136,12 +165,13 @@ def inp():
         # mouse: positive -> turn right (adjust sign if you prefer the opposite)
         direct += mx * -SENSITIVITY
         pitch += my * -SENSITIVITY
-        pitch = max(-89, min(89, pitch))  # prevent flipping
+        pitch = max(-80, min(80, pitch))  # prevent flipping
         direct %= 360
 
         # movement input
         move = (keypressed[pygame.K_w] - keypressed[pygame.K_s])  # forward/back
         sidemove = (keypressed[pygame.K_d] - keypressed[pygame.K_a])  # right/left
+        upmove = ((keypressed[pygame.K_e] or keypressed[pygame.K_SPACE]) - (keypressed[pygame.K_q] or min(pygame.key.get_mods() & pygame.KMOD_CTRL, 1)))
 
         dirrad = math.radians(direct)
         # forward vector and right vector in world coords (consistent with projection)
@@ -150,6 +180,7 @@ def inp():
 
         x += (fx * sidemove + rx * move) * speed
         y += (fy * sidemove + ry * move) * speed
+        z += upmove * speed
 
     if keypressed[pygame.K_LALT]:
         pygame.mouse.set_visible(True)
@@ -158,6 +189,19 @@ def inp():
         pygame.mouse.set_visible(False)
         pygame.event.set_grab(True)
         print(lightpos, lightstrength)
+
+def dispui():
+    global maxspeed, maxturn, carspeed, carturn, turnfactor, maxturnfactor
+    if abs(carspeed) > maxspeed:
+        maxspeed = abs(carspeed)
+    if abs(carturn) > maxturn:
+        maxturn = abs(carturn)
+    if abs(turnfactor) > maxturnfactor:
+        maxturnfactor = abs(turnfactor)
+    pygame.draw.rect(SCREEN, (225, 255, 255), (0, HEIGHT - 100, 100, 100))
+    pygame.draw.rect(SCREEN, (0, 255, 0), (0, HEIGHT - 100, 50, abs(((carspeed / maxspeed) if maxspeed != 0 else 0) * 100)))
+    pygame.draw.rect(SCREEN, (255, 0, 0), (0, HEIGHT - 100, 10, abs(((turnfactor / maxturnfactor) if maxturnfactor != 0 else 0) * 100)))
+    pygame.draw.rect(SCREEN, (0, 0, 255), (75 if carturn >= 0 else 75 - abs(((carturn / maxturn) if maxturn != 0 else 0) * 25), HEIGHT - 100, abs(((carturn / maxturn) if maxturn != 0 else 0) * 25), 100))
 
 def project_point(px, py, pz, cam):
     cx, cy, cz, cdirect, cpitch = cam
@@ -175,7 +219,7 @@ def project_point(px, py, pz, cam):
     ry2 = ry * math.cos(-pitchrad) - rz * math.sin(-pitchrad)
     rz2 = ry * math.sin(-pitchrad) + rz * math.cos(-pitchrad)
 
-    if ry2 <= 0.2:
+    if ry2 <= CLOSERANGE:
         return None
 
     focal = WIDTH / (2 * math.tan(math.radians(fov / 2)))
@@ -218,8 +262,8 @@ def calcdisp(scene, camera, renderrange):
                 if lightpos != None:
                     avgpos = tuple(map(lambda x: x / len(verts), avgpos))
                     lightdist = math.sqrt((avgpos[0] - lightpos[0])**2 + (avgpos[1] - lightpos[1])**2 + (avgpos[2] - lightpos[2])**2)
-                    brightness = min(1, lightstrength / lightdist if lightdist != 0 else 0.01)
-                    color = (color[0] * brightness, color[1] * brightness, color[2] * brightness)
+                    brightness = min(2, lightstrength / lightdist if lightdist != 0 else 0.01)
+                    color = (min(color[0] * brightness, 255), min(color[1] * brightness, 255), min(color[2] * brightness, 255))
                 renderlist.append(("poly", (avg_dist, (color, projected_points))))
 
         # regular point/square object
@@ -335,8 +379,8 @@ while running:
     
     SCREEN.fill((0, 0, 0))
     
-    vehicle.position = (carx, cary, carz)
-    vehicle.rotation = (0, 0, cardirect - 90 + carturn * (carspeed / 10))
+    vehicle.position = (carx, cary, carz) 
+    vehicle.rotation = (0, 0, cardirect - 90 + carturn * (1 + turnfactor * 3) * (carspeed / 10))
     for ind, tri in enumerate(vehicle.get_world_tri()):
         objlist.append(("poly", tri, 1, colourmap[ind]))
     world = randlist + objlist
@@ -358,6 +402,7 @@ while running:
         lf = time.time()
         f = 0
     SCREEN.blit(fpstxt, (5, 5))
+    dispui()
     pygame.display.flip()
 pygame.mouse.set_visible(True)
 if m == "h":
