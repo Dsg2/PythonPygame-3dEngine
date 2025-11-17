@@ -29,6 +29,7 @@ renderlist = []
 CLOSERANGE = max(loadvar("clipping plane", 0.2), 0.01)
 renderrange = loadvar("rendering range", 150)
 GOODLIGHTING = loadvar("beautiful lighting", 0)
+earlycull = loadvar("early culling", False)
 fov = loadvar("fov", 70)
 cache = None
 polycache = []
@@ -134,7 +135,7 @@ def project_point(px, py, pz, cam, dirrad, pitchrad, dirradcos, dirradsin, pitch
     return sx, sy, ry2
 
 def calcdisp(scene, camera, renderrange):
-    global lightpos, lightstrength, uselighting
+    global lightpos, lightstrength, uselighting, earlycull
     cx, cy, cz, cdirect, cpitch = camera
     dirrad = math.radians(cdirect)
     pitchrad = math.radians(cpitch)
@@ -151,6 +152,11 @@ def calcdisp(scene, camera, renderrange):
         # polygon object
         if group == "poly":
             verts = targ[1]
+            if earlycull == True:
+                vx, vy, vz = verts[0]
+                dx, dy, dz = vx - cx, vy - cy, vz - cz
+                if dx*dx + dy*dy + dz*dz > renderrange**2:
+                    continue
             projected_points = []
             avgpos = (0, 0, 0)
             visible = False  # track if any vertex projects on-screen
@@ -229,7 +235,12 @@ while running:
                     renderrange += 10
                 elif event.key == pygame.K_MINUS:
                     renderrange -= 10
-    
+            else:
+                if event.key == pygame.K_EQUALS:
+                    earlycull = 1 - earlycull
+                elif event.key == pygame.K_MINUS:
+                    GOODLIGHTING = 1 - GOODLIGHTING
+        
     SCREEN.fill((0, 0, 0))
     
     objlist = []
@@ -248,7 +259,7 @@ while running:
     
     f = f + 1
     if time.time() - lf >= 1:
-        fpstxt = font.render(f"{f}/{FPS} FPS | {renderrange} renderrange | {debugobj} points", True, (255, 0, 0))
+        fpstxt = font.render(f"{f}/{FPS} FPS | {renderrange} renderrange | {debugobj} points | GOODLIGHTING: {GOODLIGHTING} | EARLYCULL: {earlycull} | LIGHTING: {uselighting}", True, (255, 0, 0))
         lf = time.time()
         f = 0
     SCREEN.blit(fpstxt, (5, 5))

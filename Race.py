@@ -51,14 +51,26 @@ clock = pygame.time.Clock()
 FPS = loadvar("fps", 40)
 font = pygame.font.SysFont('Arial', 16)
 renderlist = []
-CLOSERANGE = loadvar("clipping plane", 0.2)
+CLOSERANGE = max(loadvar("clipping plane", 0.2), 0.01)
 renderrange = loadvar("rendering range", 150)
 GOODLIGHTING = loadvar("beautiful lighting", 0)
+earlycull = loadvar("early culling", False)
+fov = loadvar("fov", 70)
 cache = None
 polycache = []
 uselighting = True
 lightpos = None
 lightstrength = None
+
+HALFPI = math.pi / 2
+HALFWIDTH = WIDTH / 2
+HALFHEIGHT = HEIGHT / 2
+FOCAL = WIDTH / (2 * math.tan(math.radians(fov / 2)))
+
+append = renderlist.append
+WIDTH_ = WIDTH
+HEIGHT_ = HEIGHT
+FOCAL_ = FOCAL
 
 #game variables
 x = 0
@@ -66,7 +78,6 @@ y = 0
 z = 0
 pitch = 0
 direct = 0
-fov = loadvar("fov", 70)
 SENSITIVITY = loadvar("look sensitivity", 0.3)
 tick = 0
 incar = False
@@ -89,6 +100,7 @@ f = 0
 lf = time.time()
 fpstxt = font.render(f"{f} FPS", True, (255, 0, 0))
 debugobj = 0
+timer = 0
 
 randlist = []
 objlist = []
@@ -163,11 +175,6 @@ TILEDATA = [
 TILEPOSDATA = None
 
 randlist.append(("light", (0, 0, 10), 75, (255, 255, 255)))
-#for i in range(500):
-#    randx = random.randint(-1000, 1000)
-#    randy = random.randint(-1000, 1000)
-#    randz = random.randint(-10, 10)
-#    randlist.append(("poly", [(randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2))], 1, (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))))
 
 def plane(x, y, z, size, colour):
     planecache = []
@@ -270,7 +277,7 @@ try:
                         break
         
         # If cache miss, search all tiles
-        print("oh no")
+        print("Cached")
         for tile in TILES:
             if check_tile(tile):
                 last_tile_cache = tile
@@ -305,7 +312,7 @@ try:
             dirrad = math.radians(cardirect)
             move = (keypressed[pygame.K_w] - keypressed[pygame.K_s])  # forward/back
             fx, fy = math.cos(dirrad), math.sin(dirrad)
-            rx, ry = math.cos(dirrad + math.pi/2), math.sin(dirrad + math.pi/2)
+            rx, ry = math.cos(dirrad + HALFPI), math.sin(dirrad + HALFPI)
             
             turnfactor = (turnfactor + 0.02 * keypressed[pygame.K_LSHIFT]) / 1.05
             turn = (keypressed[pygame.K_d] - keypressed[pygame.K_a]) * 20
@@ -345,7 +352,7 @@ try:
             dirrad = math.radians(direct)
             # forward vector and right vector in world coords (consistent with projection)
             fx, fy = math.cos(dirrad), math.sin(dirrad)
-            rx, ry = math.cos(dirrad + math.pi/2), math.sin(dirrad + math.pi/2)
+            rx, ry = math.cos(dirrad + HALFPI), math.sin(dirrad + HALFPI)
 
             x += (fx * sidemove + rx * move) * speed
             y += (fy * sidemove + ry * move) * speed
@@ -372,34 +379,36 @@ try:
         pygame.draw.rect(SCREEN, (255, 0, 0), (0, HEIGHT - 100, 10, abs(((turnfactor / maxturnfactor) if maxturnfactor != 0 else 0) * 100)))
         pygame.draw.rect(SCREEN, (0, 0, 255), (75 if carturn >= 0 else 75 - abs(((carturn / maxturn) if maxturn != 0 else 0) * 25), HEIGHT - 100, abs(((carturn / maxturn) if maxturn != 0 else 0) * 25), 100))
 
-    def project_point(px, py, pz, cam):
+    def project_point(px, py, pz, cam, dirrad, pitchrad, dirradcos, dirradsin, pitchradcos, pitchradsin):
         global fov
         cx, cy, cz, cdirect, cpitch = cam
         dx, dy, dz = px - cx, py - cy, pz - cz
 
-        dirrad = math.radians(cdirect)
-        pitchrad = math.radians(cpitch)
-
         # horizontal rotation
-        rx = dx * math.cos(-dirrad) - dy * math.sin(-dirrad)
-        ry = dx * math.sin(-dirrad) + dy * math.cos(-dirrad)
+        rx = dx * dirradcos - dy * dirradsin
+        ry = dx * dirradsin + dy * dirradcos
         rz = dz
 
         # vertical rotation
-        ry2 = ry * math.cos(-pitchrad) - rz * math.sin(-pitchrad)
-        rz2 = ry * math.sin(-pitchrad) + rz * math.cos(-pitchrad)
+        ry2 = ry * pitchradcos - rz * pitchradsin
+        rz2 = ry * pitchradsin + rz * pitchradcos
 
         if ry2 <= CLOSERANGE:
             ry2 = CLOSERANGE
 
-        focal = WIDTH / (2 * math.tan(math.radians(fov / 2)))
-        sx = WIDTH / 2 + (rx / ry2) * focal
-        sy = HEIGHT / 2 - (rz2 / ry2) * focal
+        sx = HALFWIDTH + (rx * ry2**-1) * FOCAL
+        sy = HALFHEIGHT - (rz2 * ry2**-1) * FOCAL
         return sx, sy, ry2
 
     def calcdisp(scene, camera, renderrange):
-        global lightpos, lightstrength, uselighting
+        global lightpos, lightstrength, uselighting, earlycull
         cx, cy, cz, cdirect, cpitch = camera
+        dirrad = math.radians(cdirect)
+        pitchrad = math.radians(cpitch)
+        dirradcos = math.cos(-dirrad)
+        dirradsin = math.sin(-dirrad)
+        pitchradcos = math.cos(-pitchrad)
+        pitchradsin = math.sin(-pitchrad)
         renderlist = []
 
         for targ in scene:
@@ -409,7 +418,11 @@ try:
             # polygon object
             if group == "poly":
                 verts = targ[1]
-                dist_sum = 0
+                if earlycull == True:
+                    vx, vy, vz = verts[0]
+                    dx, dy, dz = vx - cx, vy - cy, vz - cz
+                    if dx*dx + dy*dy + dz*dz > renderrange**2:
+                        continue
                 projected_points = []
                 avgpos = (0, 0, 0)
                 visible = False  # track if any vertex projects on-screen
@@ -424,8 +437,7 @@ try:
                     dist = dx*dx + dy*dy + dz*dz
                     if dist > renderrange**2:
                         continue
-                    dist_sum += math.sqrt(dist)
-                    result = project_point(vx, vy, vz, camera)
+                    result = project_point(vx, vy, vz, camera, dirrad, pitchrad, dirradcos, dirradsin, pitchradcos, pitchradsin)
                     if not result:
                         continue
                     sx, sy, ry = result
@@ -435,15 +447,11 @@ try:
 
                 # add polygon if any vertex is visible
                 if len(projected_points) >= 3 and visible:
-                    avg_dist = dist_sum / len(verts)
+                    avg_dist = dist / len(verts)
                     if lightpos is not None:
                         avgpos = tuple(map(lambda x: x / len(verts), avgpos))
-                        lightdist = math.sqrt(
-                            (int(avgpos[0]) - int(lightpos[0]))**2 +
-                            (int(avgpos[1]) - int(lightpos[1]))**2 +
-                            (int(avgpos[2]) - int(lightpos[2]))**2
-                        )
-                        brightness = min(2, lightstrength / lightdist if lightdist != 0 else 0.01)
+                        lightdist = (int(avgpos[0]) - int(lightpos[0]))**2 + (int(avgpos[1]) - int(lightpos[1]))**2 + (int(avgpos[2]) - int(lightpos[2]))**2
+                        brightness = min(2, lightstrength**2 / lightdist if lightdist != 0 else 0.01)
                         color = (
                             min(color[0] * brightness, 255),
                             min(color[1] * brightness, 255),
@@ -462,10 +470,10 @@ try:
 
                 px, py, pz = targ[1]
                 dx, dy, dz = px - cx, py - cy, pz - cz
-                dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                if dist > renderrange:
+                dist = dx*dx + dy*dy + dz*dz
+                if dist > renderrange**2:
                     continue
-                result = project_point(px, py, pz, camera)
+                result = project_point(px, py, pz, camera, dirrad, pitchrad, dirradcos, dirradsin, pitchradcos, pitchradsin)
                 if not result:
                     continue
                 sx, sy, ry = result
@@ -499,10 +507,8 @@ try:
                 client_id, text = msg
                 if text is not None:
                     NM.recv(text, client_id)
-                    #print(f"Client {client_id} sent: {text}")
                 else:
                     print(f"Client {client_id} disconnected")
-            #print(carx, cary, carz, cardirect)
             sendtick += 1
             if sendtick > round(FPS / 24):
                 sendtick = 0
@@ -515,8 +521,6 @@ try:
                 if msg is None:
                     print("disconnected")
                 NM.recv(msg)
-                #print(f"from server: {msg}")
-            #print(carx, cary, carz, cardirect)
             sendtick += 1
             if sendtick > round(FPS / 24):
                 sendtick = 0
@@ -535,7 +539,6 @@ try:
         objlist = []
         
         for client in data["clients"]:
-            #print(data)
             if "pos" in data["clients"][client]:
                 vehicle.position = tuple(map(float, data["clients"][client]["pos"]))
             if "dir" in data["clients"][client]:
@@ -546,8 +549,11 @@ try:
         current_tile = get_tile_at_position(carx, cary)
 
         if current_tile == 0:
-            # Off track - maybe slow down the car
-            carspeed *= 0.95
+            if timer < 200:
+                timer += 1
+            carspeed *= (0.99 - timer * 0.001)
+        else:
+            timer = 0
 
         inp()
         
@@ -565,6 +571,11 @@ try:
                         renderrange += 10
                     elif event.key == pygame.K_MINUS:
                         renderrange -= 10
+                else:
+                    if event.key == pygame.K_EQUALS:
+                        earlycull = 1 - earlycull
+                    elif event.key == pygame.K_MINUS:
+                        GOODLIGHTING = 1 - GOODLIGHTING
         
         tick = tick + 0.01
         tick = tick % 360
@@ -590,7 +601,7 @@ try:
         
         f = f + 1
         if time.time() - lf >= 1:
-            fpstxt = font.render(f"{f}/{FPS} FPS | {renderrange} renderrange | {debugobj} objects", True, (255, 0, 0))
+            fpstxt = font.render(f"{f}/{FPS} FPS | {renderrange} renderrange | {debugobj} objects | GOODLIGHTING: {GOODLIGHTING} | EARLYCULL: {earlycull} | LIGHTING: {uselighting}", True, (255, 0, 0))
             lf = time.time()
             f = 0
         SCREEN.blit(fpstxt, (5, 5))
