@@ -54,7 +54,6 @@ renderlist = []
 CLOSERANGE = max(loadvar("clipping plane", 0.2), 0.01)
 renderrange = loadvar("rendering range", 150)
 GOODLIGHTING = loadvar("beautiful lighting", 0)
-earlycull = loadvar("early culling", False)
 fov = loadvar("fov", 70)
 cache = None
 polycache = []
@@ -66,11 +65,6 @@ HALFPI = math.pi / 2
 HALFWIDTH = WIDTH / 2
 HALFHEIGHT = HEIGHT / 2
 FOCAL = WIDTH / (2 * math.tan(math.radians(fov / 2)))
-
-append = renderlist.append
-WIDTH_ = WIDTH
-HEIGHT_ = HEIGHT
-FOCAL_ = FOCAL
 
 #game variables
 x = 0
@@ -175,6 +169,11 @@ TILEDATA = [
 TILEPOSDATA = None
 
 randlist.append(("light", (0, 0, 10), 75, (255, 255, 255)))
+#for i in range(500):
+#    randx = random.randint(-1000, 1000)
+#    randy = random.randint(-1000, 1000)
+#    randz = random.randint(-10, 10)
+#    randlist.append(("poly", [(randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2)), (randx + random.randint(-2, 2), randy + random.randint(-2, 2), randz + random.randint(-2, 2))], 1, (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))))
 
 def plane(x, y, z, size, colour):
     planecache = []
@@ -312,7 +311,7 @@ try:
             dirrad = math.radians(cardirect)
             move = (keypressed[pygame.K_w] - keypressed[pygame.K_s])  # forward/back
             fx, fy = math.cos(dirrad), math.sin(dirrad)
-            rx, ry = math.cos(dirrad + HALFPI), math.sin(dirrad + HALFPI)
+            rx, ry = math.cos(dirrad + math.pi/2), math.sin(dirrad + math.pi/2)
             
             turnfactor = (turnfactor + 0.02 * keypressed[pygame.K_LSHIFT]) / 1.05
             turn = (keypressed[pygame.K_d] - keypressed[pygame.K_a]) * 20
@@ -352,7 +351,7 @@ try:
             dirrad = math.radians(direct)
             # forward vector and right vector in world coords (consistent with projection)
             fx, fy = math.cos(dirrad), math.sin(dirrad)
-            rx, ry = math.cos(dirrad + HALFPI), math.sin(dirrad + HALFPI)
+            rx, ry = math.cos(dirrad + math.pi/2), math.sin(dirrad + math.pi/2)
 
             x += (fx * sidemove + rx * move) * speed
             y += (fy * sidemove + ry * move) * speed
@@ -401,7 +400,7 @@ try:
         return sx, sy, ry2
 
     def calcdisp(scene, camera, renderrange):
-        global lightpos, lightstrength, uselighting, earlycull
+        global lightpos, lightstrength, uselighting
         cx, cy, cz, cdirect, cpitch = camera
         dirrad = math.radians(cdirect)
         pitchrad = math.radians(cpitch)
@@ -418,11 +417,7 @@ try:
             # polygon object
             if group == "poly":
                 verts = targ[1]
-                if earlycull == True:
-                    vx, vy, vz = verts[0]
-                    dx, dy, dz = vx - cx, vy - cy, vz - cz
-                    if dx*dx + dy*dy + dz*dz > renderrange**2:
-                        continue
+                dist_sum = 0
                 projected_points = []
                 avgpos = (0, 0, 0)
                 visible = False  # track if any vertex projects on-screen
@@ -437,6 +432,7 @@ try:
                     dist = dx*dx + dy*dy + dz*dz
                     if dist > renderrange**2:
                         continue
+                    dist_sum += math.sqrt(dist)
                     result = project_point(vx, vy, vz, camera, dirrad, pitchrad, dirradcos, dirradsin, pitchradcos, pitchradsin)
                     if not result:
                         continue
@@ -447,7 +443,7 @@ try:
 
                 # add polygon if any vertex is visible
                 if len(projected_points) >= 3 and visible:
-                    avg_dist = dist / len(verts)
+                    avg_dist = dist_sum / len(verts)
                     if lightpos is not None:
                         avgpos = tuple(map(lambda x: x / len(verts), avgpos))
                         lightdist = (int(avgpos[0]) - int(lightpos[0]))**2 + (int(avgpos[1]) - int(lightpos[1]))**2 + (int(avgpos[2]) - int(lightpos[2]))**2
@@ -507,8 +503,10 @@ try:
                 client_id, text = msg
                 if text is not None:
                     NM.recv(text, client_id)
+                    #print(f"Client {client_id} sent: {text}")
                 else:
                     print(f"Client {client_id} disconnected")
+            #print(carx, cary, carz, cardirect)
             sendtick += 1
             if sendtick > round(FPS / 24):
                 sendtick = 0
@@ -521,6 +519,8 @@ try:
                 if msg is None:
                     print("disconnected")
                 NM.recv(msg)
+                #print(f"from server: {msg}")
+            #print(carx, cary, carz, cardirect)
             sendtick += 1
             if sendtick > round(FPS / 24):
                 sendtick = 0
@@ -539,6 +539,7 @@ try:
         objlist = []
         
         for client in data["clients"]:
+            #print(data)
             if "pos" in data["clients"][client]:
                 vehicle.position = tuple(map(float, data["clients"][client]["pos"]))
             if "dir" in data["clients"][client]:
@@ -571,11 +572,6 @@ try:
                         renderrange += 10
                     elif event.key == pygame.K_MINUS:
                         renderrange -= 10
-                else:
-                    if event.key == pygame.K_EQUALS:
-                        earlycull = 1 - earlycull
-                    elif event.key == pygame.K_MINUS:
-                        GOODLIGHTING = 1 - GOODLIGHTING
         
         tick = tick + 0.01
         tick = tick % 360
@@ -601,7 +597,7 @@ try:
         
         f = f + 1
         if time.time() - lf >= 1:
-            fpstxt = font.render(f"{f}/{FPS} FPS | {renderrange} renderrange | {debugobj} objects | GOODLIGHTING: {GOODLIGHTING} | EARLYCULL: {earlycull} | LIGHTING: {uselighting}", True, (255, 0, 0))
+            fpstxt = font.render(f"{f}/{FPS} FPS | {renderrange} renderrange | {debugobj} objects", True, (255, 0, 0))
             lf = time.time()
             f = 0
         SCREEN.blit(fpstxt, (5, 5))
