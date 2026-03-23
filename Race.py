@@ -315,7 +315,7 @@ try:
             
             turnfactor = (turnfactor + 0.02 * keypressed[pygame.K_LSHIFT]) / 1.05
             turn = (keypressed[pygame.K_d] - keypressed[pygame.K_a]) * 20
-            carturn = (carturn + min(1, max((mx + turn) * -SENSITIVITY * 0.4 * (turnfactor * 1.3 + 1), -1)) * 0.3) / (1.03 + (abs(carspeed / 800)))
+            carturn = (carturn + min(1, max((mx + turn) * -SENSITIVITY * 0.4 * (turnfactor * 1.3 + 1), -1)) * 0.3) / (1.01 + (abs(carspeed / 800)))
             carspeed = (carspeed + move) / 1.01 / (1 + turnfactor / 30)
             carx += (rx * carspeed + fx * (turnfactor) * carturn * 10) * 0.03
             cary += (ry * carspeed + fy * (turnfactor) * carturn * 10) * 0.03
